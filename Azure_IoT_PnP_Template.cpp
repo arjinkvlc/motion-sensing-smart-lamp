@@ -1,6 +1,3 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// SPDX-License-Identifier: MIT
-
 #include <stdarg.h>
 #include <stdlib.h>
 
@@ -88,8 +85,7 @@ static time_t last_telemetry_send_time = INDEFINITE_TIME;
 static bool led1_on = false;
 static bool led2_on = false;
 
-/* --- Function Prototypes --- */
-/* Please find the function implementations at the bottom of this file */
+
 static int generate_telemetry_payload(
     uint8_t* payload_buffer,
     size_t payload_buffer_size,
@@ -117,7 +113,6 @@ void azure_pnp_set_telemetry_frequency(size_t frequency_in_seconds)
   LogInfo("Telemetry frequency set to once every %d seconds.", telemetry_frequency_in_seconds);
 }
 
-/* Application-specific data section */
 
 int azure_pnp_send_telemetry(azure_iot_t* azure_iot)
 {
@@ -192,8 +187,6 @@ int azure_pnp_handle_command_request(azure_iot_t* azure_iot, command_request_t c
   }
   else if (az_span_is_content_equal(command.command_name, COMMAND_NAME_DISPLAY_TEXT))
   {
-    // The payload comes surrounded by quotes, so to remove them we offset the payload by 1 and its
-    // size by 2.
     LogInfo(
         "OLED display: %.*s", az_span_size(command.payload) - 2, az_span_ptr(command.payload) + 1);
     response_code = COMMAND_RESPONSE_CODE_ACCEPTED;

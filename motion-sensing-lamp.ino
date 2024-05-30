@@ -1,66 +1,26 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// SPDX-License-Identifier: MIT
-
-/*
- * This is an Arduino-based Azure IoT Central sample specific for Espressif ESP32.
- * It uses our Azure Embedded SDK for C to help interact with Azure IoT.
- * For reference, please visit https://github.com/azure/azure-sdk-for-c and
- * https://azureiotcentral.com/.
- *
- * To connect and work with Azure IoT Hub you need an MQTT client, connecting, subscribing
- * and publishing to specific topics to use the messaging features of the hub.
- * Our azure-sdk-for-c is an MQTT client support library, helping composing and parsing the
- * MQTT topic names and messages exchanged with the Azure IoT Hub.
- *
- * The additional layers in this sketch provide a structured use of azure-sdk-for-c and
- * the MQTT client of your choice to perform all the steps needed to connect and interact with
- * Azure IoT Central.
- *
- * AzureIoT.cpp contains a state machine that implements those steps, plus abstractions to simplify
- * its overall use. Besides the basic configuration needed to access the Azure IoT services,
- * all that is needed is to provide the functions required by that layer to:
- * - Interact with your MQTT client,
- * - Perform data manipulations (HMAC SHA256 encryption, Base64 decoding and encoding),
- * - Receive the callbacks for Plug and Play properties and commands.
- *
- * Azure_IoT_PnP_Template.cpp contains the actual implementation of the IoT Plug and Play template
- * specific for the Espressif ESP32 board.
- *
- * To properly connect to your Azure IoT services, please fill the information in the
- * `iot_configs.h` file.
- */
-
-/* --- Dependencies --- */
-// C99 libraries
 #include <cstdarg>
 #include <cstdlib>
 #include <string.h>
 #include <time.h>
 
-// For hmac SHA256 encryption
 #include <mbedtls/base64.h>
 #include <mbedtls/md.h>
 #include <mbedtls/sha256.h>
 
-// Libraries for MQTT client and WiFi connection
 #include <WiFi.h>
 #include <mqtt_client.h>
 
-// Azure IoT SDK for C includes
 #include <az_core.h>
 #include <az_iot.h>
 #include <azure_ca.h>
 
-// Additional sample headers
 #include "AzureIoT.h"
 #include "Azure_IoT_PnP_Template.h"
 #include "iot_configs.h"
 
-/* --- Sample-specific Settings --- */
 #define SERIAL_LOGGER_BAUD_RATE 115200
 #define MQTT_DO_NOT_RETAIN_MSG 0
 
-/* --- Time and NTP Settings --- */
 #define NTP_SERVERS "pool.ntp.org", "time.nist.gov"
 
 #define PST_TIME_ZONE -8
@@ -72,7 +32,6 @@
 #define UNIX_TIME_NOV_13_2017 1510592825
 #define UNIX_EPOCH_START_YEAR 1900
 
-/* --- Function Returns --- */
 #define RESULT_OK 0
 #define RESULT_ERROR __LINE__
 
@@ -104,16 +63,6 @@ static uint32_t properties_request_id = 0;
 static bool send_device_info = true;
 static bool azure_initial_connect = false; //Turns true when ESP32 successfully connects to Azure IoT Central for the first time
 
-/* --- MQTT Interface Functions --- */
-/*
- * These functions are used by Azure IoT to interact with whatever MQTT client used by the sample
- * (in this case, Espressif's ESP MQTT). Please see the documentation in AzureIoT.h for more
- * details.
- */
-
-/*
- * See the documentation of `mqtt_client_init_function_t` in AzureIoT.h for details.
- */
 static int mqtt_client_init_function(
     mqtt_client_config_t* mqtt_client_config,
     mqtt_client_handle_t* mqtt_client_handle)
@@ -175,9 +124,7 @@ static int mqtt_client_init_function(
   return result;
 }
 
-/*
- * See the documentation of `mqtt_client_deinit_function_t` in AzureIoT.h for details.
- */
+
 static int mqtt_client_deinit_function(mqtt_client_handle_t mqtt_client_handle)
 {
   int result = 0;
@@ -203,9 +150,7 @@ static int mqtt_client_deinit_function(mqtt_client_handle_t mqtt_client_handle)
   return 0;
 }
 
-/*
- * See the documentation of `mqtt_client_subscribe_function_t` in AzureIoT.h for details.
- */
+
 static int mqtt_client_subscribe_function(
     mqtt_client_handle_t mqtt_client_handle,
     az_span topic,
@@ -213,18 +158,13 @@ static int mqtt_client_subscribe_function(
 {
   LogInfo("MQTT client subscribing to '%.*s'", az_span_size(topic), az_span_ptr(topic));
 
-  // As per documentation, `topic` always ends with a null-terminator.
-  // esp_mqtt_client_subscribe returns the packet id or negative on error already, so no conversion
-  // is needed.
+
   int packet_id = esp_mqtt_client_subscribe(
       (esp_mqtt_client_handle_t)mqtt_client_handle, (const char*)az_span_ptr(topic), (int)qos);
 
   return packet_id;
 }
 
-/*
- * See the documentation of `mqtt_client_publish_function_t` in AzureIoT.h for details.
- */
 static int mqtt_client_publish_function(
     mqtt_client_handle_t mqtt_client_handle,
     mqtt_message_t* mqtt_message)
@@ -249,11 +189,6 @@ static int mqtt_client_publish_function(
   }
 }
 
-/* --- Other Interface functions required by Azure IoT --- */
-
-/*
- * See the documentation of `hmac_sha256_encryption_function_t` in AzureIoT.h for details.
- */
 static int mbedtls_hmac_sha256(
     const uint8_t* key,
     size_t key_length,
@@ -276,9 +211,6 @@ static int mbedtls_hmac_sha256(
   return 0;
 }
 
-/*
- * See the documentation of `base64_decode_function_t` in AzureIoT.h for details.
- */
 static int base64_decode(
     uint8_t* data,
     size_t data_length,
@@ -289,9 +221,6 @@ static int base64_decode(
   return mbedtls_base64_decode(decoded, decoded_size, decoded_length, data, data_length);
 }
 
-/*
- * See the documentation of `base64_encode_function_t` in AzureIoT.h for details.
- */
 static int base64_encode(
     uint8_t* data,
     size_t data_length,
@@ -302,32 +231,23 @@ static int base64_encode(
   return mbedtls_base64_encode(encoded, encoded_size, encoded_length, data, data_length);
 }
 
-/*
- * See the documentation of `properties_update_completed_t` in AzureIoT.h for details.
- */
+
 static void on_properties_update_completed(uint32_t request_id, az_iot_status status_code)
 {
   LogInfo("Properties update request completed (id=%d, status=%d)", request_id, status_code);
 }
 
-/*
- * See the documentation of `properties_received_t` in AzureIoT.h for details.
- */
 void on_properties_received(az_span properties)
 {
   LogInfo("Properties update received: %.*s", az_span_size(properties), az_span_ptr(properties));
 
-  // It is recommended not to perform work within callbacks.
-  // The properties are being handled here to simplify the sample.
   if (azure_pnp_handle_properties_update(&azure_iot, properties, properties_request_id++) != 0)
   {
     LogError("Failed handling properties update.");
   }
 }
 
-/*
- * See the documentation of `command_request_received_t` in AzureIoT.h for details.
- */
+
 static void on_command_request_received(command_request_t command)
 {
   az_span component_name
@@ -342,18 +262,12 @@ static void on_command_request_received(command_request_t command)
       az_span_size(command.command_name),
       az_span_ptr(command.command_name));
 
-  // Here the request is being processed within the callback that delivers the command request.
-  // However, for production application the recommendation is to save `command` and process it
-  // outside this callback, usually inside the main thread/task/loop.
+
   (void)azure_pnp_handle_command_request(&azure_iot, command);
 }
 
 static void configure_azure_iot() {
-   /*
-   * The configuration structure used by Azure IoT must remain unchanged (including data buffer)
-   * throughout the lifetime of the sample. This variable must also not lose context so other
-   * components do not overwrite any information within this structure.
-   */
+
   azure_iot_config.user_agent = AZ_SPAN_FROM_STR(AZURE_SDK_CLIENT_USER_AGENT);
   azure_iot_config.model_id = azure_pnp_get_model_id();
   azure_iot_config.use_device_provisioning = true; // Required for Azure IoT Central.
@@ -390,7 +304,6 @@ static void configure_azure_iot() {
   azure_iot_init(&azure_iot, &azure_iot_config);
 }
 
-/* --- Arduino setup and loop Functions --- */
 void setup()
 {
   Serial.begin(SERIAL_LOGGER_BAUD_RATE);
@@ -457,15 +370,8 @@ void loop()
   }
 }
 
-/* === Function Implementations === */
 
-/*
- * These are support functions used by the sample itself to perform its basic tasks
- * of connecting to the internet, syncing the board clock, ESP MQTT client event handler
- * and logging.
- */
 
-/* --- System and Platform Functions --- */
 static void sync_device_clock_with_ntp_server()
 {
   LogInfo("Setting time using SNTP");

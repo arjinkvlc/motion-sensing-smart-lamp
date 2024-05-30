@@ -1,21 +1,16 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// SPDX-License-Identifier: MIT
 
 #include "AzureIoT.h"
 #include <stdarg.h>
 
 #include <az_precondition_internal.h>
 
-/* --- Function Returns --- */
 #define RESULT_OK 0
 #define RESULT_ERROR __LINE__
 
-/* --- Logging --- */
 #ifndef DISABLE_LOGGING
 log_function_t default_logging_function = NULL;
 #endif // DISABLE_LOGGING
 
-/* --- Azure Definitions --- */
 #define IOT_HUB_MQTT_PORT AZ_IOT_DEFAULT_MQTT_CONNECT_PORT
 #define MQTT_PROTOCOL_PREFIX "mqtts://"
 #define DPS_GLOBAL_ENDPOINT_MQTT_URI MQTT_PROTOCOL_PREFIX DPS_GLOBAL_ENDPOINT_FQDN
@@ -272,22 +267,7 @@ void azure_iot_do_work(azure_iot_t* azure_iot)
     case azure_iot_state_started:
       if (azure_iot->config->use_device_provisioning && !is_device_provisioned(azure_iot))
       {
-        // This seems harmless, but...
-        // azure_iot->config->data_buffer always points to the original buffer provided by the user.
-        // azure_iot->data_buffer is an intermediate pointer. It starts by pointing to
-        // azure_iot->config->data_buffer. In the steps below the code might need to retain part of
-        // azure_iot->data_buffer for saving some critical information, namely the DPS operation id,
-        // the provisioned IoT Hub FQDN and provisioned Device ID (if provisioning is being used).
-        // In these cases, azure_iot->data_buffer will then point to `the remaining available space`
-        // of azure_iot->config->data_buffer after deducting the spaces for the data mentioned above
-        // (DPS operation id, IoT Hub FQDN and Device ID). Not all these data exist at the same time
-        // though. Memory (from azure_iot->data_buffer) is taken/reserved for the `Operation ID`
-        // while provisioning is in progress, but as soon as it is succesfully completed the
-        // `Operation ID` is no longer needed, so its memory is released back into
-        // azure_iot->data_buffer, but then space is reserved again for the provisioned IoT Hub FQDN
-        // and Device ID. Finally, when the client is stopped and started again, it does not do
-        // provisioning again if done already. In such case, the logic needs to preserve the spaces
-        // reserved for IoT Hub FQDN and Device ID previously provisioned.
+
         azure_iot->data_buffer = azure_iot->config->data_buffer;
 
         result = get_mqtt_client_config_for_dps(azure_iot, &mqtt_client_config);
@@ -681,14 +661,11 @@ int azure_iot_mqtt_client_disconnected(azure_iot_t* azure_iot)
 
   if (azure_iot->state == azure_iot_state_refreshing_sas)
   {
-    // Moving the state to azure_iot_state_provisioned will cause this client to move
-    // on to trying to connect to the Azure IoT Hub again.
     azure_iot->state = azure_iot_state_provisioned;
     result = RESULT_OK;
   }
   else
   {
-    // MQTT client could disconnect at any time for any reason, it is an expected situation.
     azure_iot->state = azure_iot_state_initialized;
     result = RESULT_OK;
   }
@@ -732,9 +709,6 @@ int azure_iot_mqtt_client_subscribe_completed(azure_iot_t* azure_iot, int packet
   return result;
 }
 
-/*
- * Currently unused.
- */
 int azure_iot_mqtt_client_publish_completed(azure_iot_t* azure_iot, int packet_id)
 {
   _az_PRECONDITION_NOT_NULL(azure_iot);
@@ -755,11 +729,7 @@ int azure_iot_mqtt_client_message_received(azure_iot_t* azure_iot, mqtt_message_
 
   if (azure_iot->state == azure_iot_state_ready)
   {
-    // This message should either be:
-    // - a response to a properties update request, or
-    // - a response to a "get" properties request, or
-    // - a command request.
-
+ 
     az_iot_hub_client_properties_message property_message;
     azrc = az_iot_hub_client_properties_parse_received_topic(
         &azure_iot->iot_hub_client, mqtt_message->topic, &property_message);
@@ -782,8 +752,7 @@ int azure_iot_mqtt_client_message_received(azure_iot_t* azure_iot, mqtt_message_
           result = RESULT_OK;
           break;
 
-        // When the device publishes a property update, this message type arrives when
-        // server acknowledges this.
+
         case AZ_IOT_HUB_CLIENT_PROPERTIES_MESSAGE_TYPE_ACKNOWLEDGEMENT:
           result = RESULT_OK;
 
@@ -807,7 +776,6 @@ int azure_iot_mqtt_client_message_received(azure_iot_t* azure_iot, mqtt_message_
           }
           break;
 
-        // An error has occurred
         case AZ_IOT_HUB_CLIENT_PROPERTIES_MESSAGE_TYPE_ERROR:
           LogError("Message Type: Request Error");
           result = RESULT_ERROR;
@@ -979,27 +947,13 @@ int azure_iot_send_command_response(
   }
 }
 
-/* --- Implementation of internal functions --- */
 
-/*
- * @brief           Gets the number of seconds since UNIX epoch until now.
- * @return uint32_t Number of seconds.
- */
 static uint32_t get_current_unix_time()
 {
   time_t now = time(NULL);
   return (now == INDEFINITE_TIME ? 0 : (uint32_t)(now));
 }
 
-/*
- * @brief           Initializes the Device Provisioning client and generates the config for an MQTT
- * client.
- * @param[in]       azure_iot          A pointer to an initialized instance of azure_iot_t.
- * @param[in]       mqtt_client_config A pointer to a generic structure to contain the configuration
- * for creating and connecting an MQTT client to Azure Device Provisioning service.
- *
- * @return int      0 on success, non-zero if any failure occurs.
- */
 static int get_mqtt_client_config_for_dps(
     azure_iot_t* azure_iot,
     mqtt_client_config_t* mqtt_client_config)
@@ -1080,15 +1034,6 @@ static int get_mqtt_client_config_for_dps(
   return RESULT_OK;
 }
 
-/*
- * @brief           Initializes the Azure IoT Hub client and generates the config for an MQTT
- * client.
- * @param[in]       azure_iot          A pointer to an initialized instance of azure_iot_t.
- * @param[in]       mqtt_client_config A pointer to a generic structure to contain the configuration
- * for creating and connecting an MQTT client to Azure IoT Hub.
- *
- * @return int      0 on success, non-zero if any failure occurs.
- */
 static int get_mqtt_client_config_for_iot_hub(
     azure_iot_t* azure_iot,
     mqtt_client_config_t* mqtt_client_config)
@@ -1164,34 +1109,6 @@ static int get_mqtt_client_config_for_iot_hub(
   return RESULT_OK;
 }
 
-/*
- * @brief           Generates a SAS token used as password for connecting with Azure Device
- * Provisioning.
- * @remarks         The SAS token generation depends on the following steps:
- *                  1. Calculate the expiration time, as current unix time since epoch plus the
- * token duration, in minutes.
- *                  2. Generate the SAS signature;
- *                    a. Generate the DPS-specific secret string (a.k.a., "signature");
- *                    b. base64-decode the encryption key (device key);
- *                    c. Encrypt (HMAC-SHA256) the signature using the base64-decoded encryption
- * key; d. base64-encode the encrypted signature, which gives the final SAS signature (sig);
- *                  3. Compose the final SAS token with the DPS audience (sr), SAS signature (sig)
- * and expiration time (se).
- * @param[in]       provisioning_client         A pointer to an initialized instance of
- * az_iot_provisioning_client.
- * @param[in]       device_key                  az_span containing the device key.
- * @param[in]       duration_in_minutes         Duration of the SAS token, in minutes.
- * @param[in]       data_buffer_span            az_span with a buffer containing enough space for
- * all the intermediate data generated by this function.
- * @param[in]       data_manipulation_functions Set of user-defined functions needed for the
- * generation of the SAS token.
- * @param[out]      sas_token                   az_span with buffer where to write the resulting SAS
- * token.
- * @param[out]      expiration_time             The expiration time of the resulting SAS token, as
- * unix time.
- *
- * @return int      Length of the resulting SAS token, or zero if any failure occurs.
- */
 static int generate_sas_token_for_dps(
     az_iot_provisioning_client* provisioning_client,
     az_span device_key,
@@ -1288,33 +1205,7 @@ static int generate_sas_token_for_dps(
   return mqtt_password_length;
 }
 
-/*
- * @brief           Generates a SAS token used as password for connecting with Azure IoT Hub.
- * @remarks         The SAS token generation depends on the following steps:
- *                  1. Calculate the expiration time, as current unix time since epoch plus the
- * token duration, in minutes.
- *                  2. Generate the SAS signature;
- *                    a. Generate the DPS-specific secret string (a.k.a., "signature");
- *                    b. base64-decode the encryption key (device key);
- *                    c. Encrypt (HMAC-SHA256) the signature using the base64-decoded encryption
- * key; d. base64-encode the encrypted signature, which gives the final SAS signature (sig);
- *                  3. Compose the final SAS token with the DPS audience (sr), SAS signature (sig)
- * and expiration time (se).
- * @param[in]       iot_hub_client              A pointer to an initialized instance of
- * az_iot_hub_client.
- * @param[in]       device_key                  az_span containing the device key.
- * @param[in]       duration_in_minutes         Duration of the SAS token, in minutes.
- * @param[in]       data_buffer_span            az_span with a buffer containing enough space for
- * all the intermediate data generated by this function.
- * @param[in]       data_manipulation_functions Set of user-defined functions needed for the
- * generation of the SAS token.
- * @param[out]      sas_token                   az_span with buffer where to write the resulting SAS
- * token.
- * @param[out]      expiration_time             The expiration time of the resulting SAS token, as
- * unix time.
- *
- * @return int      Length of the resulting SAS token, or zero if any failure occurs.
- */
+
 static int generate_sas_token_for_iot_hub(
     az_iot_hub_client* iot_hub_client,
     az_span device_key,
