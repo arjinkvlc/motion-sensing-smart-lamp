@@ -45,6 +45,9 @@
 #define TELEMETRY_PROP_NAME_ACCELEROMETERX "accelerometerX"
 #define TELEMETRY_PROP_NAME_ACCELEROMETERY "accelerometerY"
 #define TELEMETRY_PROP_NAME_ACCELEROMETERZ "accelerometerZ"
+#include <unistd.h> // usleep için
+
+#define DELAY_BETWEEN_MESSAGES_SECONDS 5
 
 static az_span COMMAND_NAME_TOGGLE_LED_1 = AZ_SPAN_FROM_STR("ToggleLed1");
 static az_span COMMAND_NAME_TOGGLE_LED_2 = AZ_SPAN_FROM_STR("ToggleLed2");
@@ -227,6 +230,7 @@ int azure_pnp_handle_properties_update(
 }
 
 /* --- Internal Functions --- */
+
 static float simulated_get_temperature() { return 21.0; }
 
 static float simulated_get_humidity() { return 88.0; }
@@ -391,6 +395,63 @@ static int generate_telemetry_payload(
 
   payload_buffer[az_span_size(payload_buffer_span)] = null_terminator;
   *payload_buffer_length = az_span_size(payload_buffer_span);
+
+  return RESULT_OK;
+}
+int azure_pnp_send_pir_state(azure_iot_t* azure_iot, int pirState)
+{
+  _az_PRECONDITION_NOT_NULL(azure_iot);
+
+  time_t now = time(NULL);
+
+  if (now == INDEFINITE_TIME)
+  {
+    LogError("Failed getting current time for controlling PIR state telemetry.");
+    return RESULT_ERROR;
+  }
+
+  static time_t last_pir_send_time = INDEFINITE_TIME;
+  static const size_t pir_send_frequency_in_seconds = 5; // Set the frequency to 1 second
+
+  if (last_pir_send_time == INDEFINITE_TIME || difftime(now, last_pir_send_time) >= pir_send_frequency_in_seconds)
+  {
+    az_json_writer jw;
+    az_result rc;
+    uint8_t data_buffer[DATA_BUFFER_SIZE];
+
+    rc = az_json_writer_init(&jw, az_span_create(data_buffer, DATA_BUFFER_SIZE), NULL);
+    EXIT_IF_AZ_FAILED(rc, RESULT_ERROR, "Failed initializing json writer for PIR state.");
+
+    rc = az_json_writer_append_begin_object(&jw);
+    EXIT_IF_AZ_FAILED(rc, RESULT_ERROR, "Failed setting PIR state json root.");
+
+    rc = az_json_writer_append_property_name(&jw, AZ_SPAN_FROM_STR("PIRMotionSensor"));
+    EXIT_IF_AZ_FAILED(rc, RESULT_ERROR, "Failed adding pirState property name to payload.");
+    rc = az_json_writer_append_int32(&jw, pirState);
+    EXIT_IF_AZ_FAILED(rc, RESULT_ERROR, "Failed adding pirState property value to payload.");
+
+    rc = az_json_writer_append_end_object(&jw);
+    EXIT_IF_AZ_FAILED(rc, RESULT_ERROR, "Failed closing PIR state json payload.");
+
+    az_span payload_buffer = az_json_writer_get_bytes_used_in_destination(&jw);
+
+    if (az_span_size(payload_buffer) >= DATA_BUFFER_SIZE)
+    {
+      LogError("Insufficient space for PIR state payload.");
+      return RESULT_ERROR;
+    }
+
+    if (azure_iot_send_telemetry(azure_iot, payload_buffer) != RESULT_OK)
+    {
+      LogError("Failed sending PIR state telemetry.");
+      return RESULT_ERROR;
+    }
+
+    last_pir_send_time = now;
+  }
+
+  // Sleep for a short duration to avoid sending telemetry too frequently
+  usleep(100);
 
   return RESULT_OK;
 }

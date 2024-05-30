@@ -17,7 +17,7 @@ void azure_pnp_set_telemetry_frequency(size_t frequency_in_seconds);
 int azure_pnp_send_telemetry(azure_iot_t* azure_iot);
 
 int azure_pnp_handle_command_request(azure_iot_t* azure_iot, command_request_t command_request);
-
+int azure_pnp_send_pir_state(azure_iot_t* pnp_client, int pirState);
 
 int azure_pnp_handle_properties_update(
     azure_iot_t* azure_iot,

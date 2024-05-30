@@ -38,7 +38,6 @@
 /* --- Handling iot_config.h Settings --- */
 static const char* wifi_ssid = IOT_CONFIG_WIFI_SSID;
 static const char* wifi_password = IOT_CONFIG_WIFI_PASSWORD;
-
 /* --- Function Declarations --- */
 static void sync_device_clock_with_ntp_server();
 static void connect_to_wifi();
@@ -308,6 +307,9 @@ void setup()
 {
   Serial.begin(SERIAL_LOGGER_BAUD_RATE);
   set_logging_function(logging_function);
+  pinMode(pirPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+  delay(10000);
 
   connect_to_wifi();
   sync_device_clock_with_ntp_server();
@@ -319,20 +321,29 @@ void setup()
 
   LogInfo("Azure IoT client initialized (state=%d)", azure_iot.state);
 }
-
+void motionCheck(){
+  pirState = digitalRead(pirPin);
+  if (pirState == HIGH) {
+    digitalWrite(ledPin, HIGH);
+    Serial.println("Motion detected!");
+    delay(5000);
+  } else {
+    digitalWrite(ledPin, LOW);
+  }
+}
 void loop()
 {
+  // Pir sensöründen durumu kontrol edin
+
   if (WiFi.status() != WL_CONNECTED)
   {
+    // WiFi bağlı değilse, yeniden bağlanmayı deneyin
     azure_iot_stop(&azure_iot);
-    
     connect_to_wifi();
-    
     if (!azure_initial_connect)
     {
       configure_azure_iot();
     }
-    
     azure_iot_start(&azure_iot);
   }
   else
@@ -341,34 +352,37 @@ void loop()
     {
       case azure_iot_connected:
         azure_initial_connect = true;
-
         if (send_device_info)
         {
           (void)azure_pnp_send_device_info(&azure_iot, properties_request_id++);
-          send_device_info = false; // Only need to send once.
+          send_device_info = false; // Sadece bir kez gönderilmesi gerekiyor.
         }
-        else if (azure_pnp_send_telemetry(&azure_iot) != 0)
+        else
         {
-          LogError("Failed sending telemetry.");
+          motionCheck();
+          // Pir sensöründen alınan durumu Azure IoT Central'a gönderin
+          if (azure_pnp_send_pir_state(&azure_iot, pirState) != 0)
+          {
+            LogError("Pir durumu gönderme başarısız oldu.");
+          }
         }
         break;
-        
       case azure_iot_error:
-        LogError("Azure IoT client is in error state.");
+        LogError("Azure IoT istemcisi hata durumunda.");
         azure_iot_stop(&azure_iot);
         break;
-        
       case azure_iot_disconnected:
+        // WiFi bağlantısını kesin
         WiFi.disconnect();
         break;
-        
       default:
         break;
     }
-
+    // Azure IoT kütüphanesine işlem yaptırın
     azure_iot_do_work(&azure_iot);
   }
 }
+
 
 
 
